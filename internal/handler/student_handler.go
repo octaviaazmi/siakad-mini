@@ -29,11 +29,21 @@ var (
 	reEmail = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 )
 
+func hitungBatasSKS(ipk float64) int {
+	switch {
+	case ipk >= 3.00:
+		return 24
+	case ipk >= 2.50:
+		return 21
+	default:
+		return 18
+	}
+}
+
 // =========================================================
 // GET /api/v1/students
 // =========================================================
 func (h *StudentHandler) List(c *gin.Context) {
-	// Pagination
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	if page < 1 {
 		page = 1
@@ -47,7 +57,6 @@ func (h *StudentHandler) List(c *gin.Context) {
 		perPage = 50
 	}
 
-	// Filters
 	prodi := c.Query("prodi")
 	angkatan := c.Query("angkatan")
 	search := c.Query("search")
@@ -225,5 +234,95 @@ func (h *StudentHandler) Create(c *gin.Context) {
 		"angkatan":     student.Angkatan,
 		"ipk_terakhir": student.IPKTerakhir,
 		"email":        req.Email,
+	})
+}
+
+// =========================================================
+// GET /api/v1/students/{id}
+// =========================================================
+func (h *StudentHandler) Detail(c *gin.Context) {
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
+	if err != nil || id < 1 {
+		utils.JSONError(c, http.StatusNotFound, "Mahasiswa tidak ditemukan", nil)
+		return
+	}
+
+	// Ambil data mahasiswa
+	var student models.Student
+	if err := h.DB.First(&student, id).Error; err != nil {
+		utils.JSONError(c, http.StatusNotFound, "Mahasiswa tidak ditemukan", nil)
+		return
+	}
+
+	// Cek hak akses
+	role, _ := c.Get("role")
+	roleStr, _ := role.(string)
+
+	if roleStr == "mahasiswa" {
+		uidAny, _ := c.Get("user_id")
+		uid, _ := uidAny.(uint)
+		if student.UserID != uid {
+			utils.JSONError(c, http.StatusForbidden, "Akses ditolak", nil)
+			return
+		}
+	} else if roleStr != "admin" {
+		utils.JSONError(c, http.StatusForbidden, "Akses ditolak", nil)
+		return
+	}
+
+	// Ambil daftar mata kuliah yang diambil (via enrollments)
+	type courseItem struct {
+		EnrollmentID  uint   `json:"enrollment_id"`
+		CourseID      uint   `json:"course_id"`
+		KodeMK        string `json:"kode_mk"`
+		NamaMK        string `json:"nama_mk"`
+		SKS           int    `json:"sks"`
+		Semester      int    `json:"semester"`
+		TahunAkademik string `json:"tahun_akademik"`
+	}
+
+	var rows []struct {
+		EnrollmentID  uint
+		CourseID      uint
+		KodeMK        string
+		NamaMK        string
+		SKS           int
+		Semester      int
+		TahunAkademik string
+	}
+
+	h.DB.Table("enrollments").
+		Select("enrollments.id AS enrollment_id, courses.id AS course_id, courses.kode_mk, courses.nama_mk, courses.sks, courses.semester, enrollments.tahun_akademik").
+		Joins("JOIN courses ON courses.id = enrollments.course_id").
+		Where("enrollments.student_id = ?", student.ID).
+		Order("enrollments.id ASC").
+		Scan(&rows)
+
+	courses := make([]courseItem, 0, len(rows))
+	totalSKS := 0
+	for _, r := range rows {
+		courses = append(courses, courseItem{
+			EnrollmentID:  r.EnrollmentID,
+			CourseID:      r.CourseID,
+			KodeMK:        r.KodeMK,
+			NamaMK:        r.NamaMK,
+			SKS:           r.SKS,
+			Semester:      r.Semester,
+			TahunAkademik: r.TahunAkademik,
+		})
+		totalSKS += r.SKS
+	}
+
+	utils.JSONSuccess(c, http.StatusOK, "Detail mahasiswa berhasil diambil", gin.H{
+		"id":           student.ID,
+		"nim":          student.NIM,
+		"nama":         student.Nama,
+		"prodi":        student.Prodi,
+		"angkatan":     student.Angkatan,
+		"ipk_terakhir": student.IPKTerakhir,
+		"mata_kuliah":  courses,
+		"total_sks":    totalSKS,
+		"batas_sks":    hitungBatasSKS(student.IPKTerakhir),
 	})
 }

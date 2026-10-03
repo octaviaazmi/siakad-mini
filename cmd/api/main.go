@@ -34,6 +34,7 @@ func main() {
 		auth.Use(middleware.Auth(cfg))
 		{
 			auth.GET("/auth/me", authHandler.Me)
+			auth.GET("/students/:id", studentHandler.Detail)
 		}
 
 		// admin only
