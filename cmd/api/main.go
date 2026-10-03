@@ -43,6 +43,8 @@ func main() {
 		{
 			admin.GET("/students", studentHandler.List)
 			admin.POST("/students", studentHandler.Create)
+			admin.PUT("/students/:id", studentHandler.Update)
+			admin.DELETE("/students/:id", studentHandler.Delete)
 		}
 	}
 

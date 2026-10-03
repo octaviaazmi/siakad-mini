@@ -248,14 +248,12 @@ func (h *StudentHandler) Detail(c *gin.Context) {
 		return
 	}
 
-	// Ambil data mahasiswa
 	var student models.Student
 	if err := h.DB.First(&student, id).Error; err != nil {
 		utils.JSONError(c, http.StatusNotFound, "Mahasiswa tidak ditemukan", nil)
 		return
 	}
 
-	// Cek hak akses
 	role, _ := c.Get("role")
 	roleStr, _ := role.(string)
 
@@ -271,7 +269,6 @@ func (h *StudentHandler) Detail(c *gin.Context) {
 		return
 	}
 
-	// Ambil daftar mata kuliah yang diambil (via enrollments)
 	type courseItem struct {
 		EnrollmentID  uint   `json:"enrollment_id"`
 		CourseID      uint   `json:"course_id"`
@@ -325,4 +322,117 @@ func (h *StudentHandler) Detail(c *gin.Context) {
 		"total_sks":    totalSKS,
 		"batas_sks":    hitungBatasSKS(student.IPKTerakhir),
 	})
+}
+
+// =========================================================
+// PUT /api/v1/students/{id}
+// =========================================================
+type updateStudentRequest struct {
+	Nama        string   `json:"nama"`
+	Prodi       string   `json:"prodi"`
+	Angkatan    *int     `json:"angkatan"`
+	IPKTerakhir *float64 `json:"ipk_terakhir"`
+}
+
+func (h *StudentHandler) Update(c *gin.Context) {
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
+	if err != nil || id < 1 {
+		utils.JSONError(c, http.StatusNotFound, "Mahasiswa tidak ditemukan", nil)
+		return
+	}
+
+	var student models.Student
+	if err := h.DB.First(&student, id).Error; err != nil {
+		utils.JSONError(c, http.StatusNotFound, "Mahasiswa tidak ditemukan", nil)
+		return
+	}
+
+	var req updateStudentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.JSONError(c, http.StatusUnprocessableEntity, "Validasi gagal", map[string]string{
+			"body": err.Error(),
+		})
+		return
+	}
+
+	errors := map[string]string{}
+
+	currentYear := time.Now().Year()
+	if req.Angkatan != nil {
+		if *req.Angkatan < 1900 || *req.Angkatan > currentYear {
+			errors["angkatan"] = "Angkatan harus 4 digit dan tidak melebihi tahun berjalan"
+		}
+	}
+
+	if req.IPKTerakhir != nil {
+		if *req.IPKTerakhir < 0 || *req.IPKTerakhir > 4 {
+			errors["ipk_terakhir"] = "IPK harus antara 0.00 dan 4.00"
+		}
+	}
+
+	if len(errors) > 0 {
+		utils.JSONError(c, http.StatusUnprocessableEntity, "Validasi gagal", errors)
+		return
+	}
+
+	// Update hanya field yang dikirim
+	updates := map[string]interface{}{}
+	if req.Nama != "" {
+		updates["nama"] = req.Nama
+	}
+	if req.Prodi != "" {
+		updates["prodi"] = req.Prodi
+	}
+	if req.Angkatan != nil {
+		updates["angkatan"] = *req.Angkatan
+	}
+	if req.IPKTerakhir != nil {
+		updates["ipk_terakhir"] = *req.IPKTerakhir
+	}
+
+	if len(updates) > 0 {
+		if err := h.DB.Model(&student).Updates(updates).Error; err != nil {
+			utils.JSONError(c, http.StatusInternalServerError, "Gagal memperbarui data", nil)
+			return
+		}
+	}
+
+	// Reload data terbaru
+	h.DB.First(&student, id)
+
+	utils.JSONSuccess(c, http.StatusOK, "Data mahasiswa berhasil diperbarui", gin.H{
+		"id":           student.ID,
+		"nim":          student.NIM,
+		"nama":         student.Nama,
+		"prodi":        student.Prodi,
+		"angkatan":     student.Angkatan,
+		"ipk_terakhir": student.IPKTerakhir,
+	})
+}
+
+// =========================================================
+// DELETE /api/v1/students/{id}
+// =========================================================
+func (h *StudentHandler) Delete(c *gin.Context) {
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
+	if err != nil || id < 1 {
+		utils.JSONError(c, http.StatusNotFound, "Mahasiswa tidak ditemukan", nil)
+		return
+	}
+
+	var student models.Student
+	if err := h.DB.First(&student, id).Error; err != nil {
+		utils.JSONError(c, http.StatusNotFound, "Mahasiswa tidak ditemukan", nil)
+		return
+	}
+
+	// Soft delete
+	if err := h.DB.Delete(&student).Error; err != nil {
+		utils.JSONError(c, http.StatusInternalServerError, "Gagal menghapus data", nil)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }
