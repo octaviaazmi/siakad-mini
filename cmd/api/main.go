@@ -23,18 +23,21 @@ func main() {
 
 	authHandler := handler.NewAuthHandler(database.DB, cfg)
 	studentHandler := handler.NewStudentHandler(database.DB)
+	courseHandler := handler.NewCourseHandler(database.DB)
+	enrollmentHandler := handler.NewEnrollmentHandler(database.DB)
 
 	v1 := r.Group("/api/v1")
 	{
 		// publik
 		v1.POST("/auth/login", authHandler.Login)
 
-		// butuh token
+		// butuh token (semua role)
 		auth := v1.Group("")
 		auth.Use(middleware.Auth(cfg))
 		{
 			auth.GET("/auth/me", authHandler.Me)
 			auth.GET("/students/:id", studentHandler.Detail)
+			auth.GET("/courses", courseHandler.List)
 		}
 
 		// admin only
@@ -45,6 +48,13 @@ func main() {
 			admin.POST("/students", studentHandler.Create)
 			admin.PUT("/students/:id", studentHandler.Update)
 			admin.DELETE("/students/:id", studentHandler.Delete)
+		}
+
+		// mahasiswa only
+		mahasiswa := v1.Group("")
+		mahasiswa.Use(middleware.Auth(cfg), middleware.RequireRole("mahasiswa"))
+		{
+			mahasiswa.POST("/enrollments", enrollmentHandler.Create)
 		}
 	}
 
