@@ -5,6 +5,7 @@ import (
 
 	"siakad-mini/internal/config"
 	"siakad-mini/internal/database"
+	"siakad-mini/internal/seeders"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,6 +14,8 @@ func main() {
 	cfg := config.Load()
 
 	database.Connect(cfg)
+	database.Migrate()
+	seeders.Run(database.DB)
 
 	r := gin.Default()
 
