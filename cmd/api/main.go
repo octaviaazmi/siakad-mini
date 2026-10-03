@@ -41,6 +41,7 @@ func main() {
 		admin.Use(middleware.Auth(cfg), middleware.RequireRole("admin"))
 		{
 			admin.GET("/students", studentHandler.List)
+			admin.POST("/students", studentHandler.Create)
 		}
 	}
 
