@@ -15,6 +15,11 @@ import (
 func main() {
 	cfg := config.Load()
 
+	// Mode production → matikan debug Gin
+	if cfg.AppEnv == "production" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	database.Connect(cfg)
 	database.Migrate()
 	seeders.Run(database.DB)
@@ -28,10 +33,8 @@ func main() {
 
 	v1 := r.Group("/api/v1")
 	{
-		// publik
 		v1.POST("/auth/login", authHandler.Login)
 
-		// butuh token (semua role)
 		auth := v1.Group("")
 		auth.Use(middleware.Auth(cfg))
 		{
@@ -40,7 +43,6 @@ func main() {
 			auth.GET("/courses", courseHandler.List)
 		}
 
-		// admin only
 		admin := v1.Group("")
 		admin.Use(middleware.Auth(cfg), middleware.RequireRole("admin"))
 		{
@@ -50,7 +52,6 @@ func main() {
 			admin.DELETE("/students/:id", studentHandler.Delete)
 		}
 
-		// mahasiswa only
 		mahasiswa := v1.Group("")
 		mahasiswa.Use(middleware.Auth(cfg), middleware.RequireRole("mahasiswa"))
 		{
@@ -59,7 +60,7 @@ func main() {
 		}
 	}
 
-	log.Printf("Server jalan di port %s", cfg.AppPort)
+	log.Printf("Server jalan di port %s (mode: %s)", cfg.AppPort, cfg.AppEnv)
 	if err := r.Run(":" + cfg.AppPort); err != nil {
 		log.Fatalf("Server gagal jalan: %v", err)
 	}
