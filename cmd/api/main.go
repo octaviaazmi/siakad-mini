@@ -22,15 +22,25 @@ func main() {
 	r := gin.Default()
 
 	authHandler := handler.NewAuthHandler(database.DB, cfg)
+	studentHandler := handler.NewStudentHandler(database.DB)
 
 	v1 := r.Group("/api/v1")
 	{
+		// publik
 		v1.POST("/auth/login", authHandler.Login)
 
+		// butuh token
 		auth := v1.Group("")
 		auth.Use(middleware.Auth(cfg))
 		{
 			auth.GET("/auth/me", authHandler.Me)
+		}
+
+		// admin only
+		admin := v1.Group("")
+		admin.Use(middleware.Auth(cfg), middleware.RequireRole("admin"))
+		{
+			admin.GET("/students", studentHandler.List)
 		}
 	}
 
