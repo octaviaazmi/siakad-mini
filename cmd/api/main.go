@@ -55,6 +55,7 @@ func main() {
 		mahasiswa.Use(middleware.Auth(cfg), middleware.RequireRole("mahasiswa"))
 		{
 			mahasiswa.POST("/enrollments", enrollmentHandler.Create)
+			mahasiswa.DELETE("/enrollments/:id", enrollmentHandler.Delete)
 		}
 	}
 

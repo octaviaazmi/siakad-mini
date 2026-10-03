@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 
 	"siakad-mini/internal/models"
 	"siakad-mini/internal/utils"
@@ -33,18 +34,15 @@ type createEnrollmentRequest struct {
 // POST /api/v1/enrollments
 // =========================================================
 func (h *EnrollmentHandler) Create(c *gin.Context) {
-	// Ambil user_id dari token
 	uidAny, _ := c.Get("user_id")
 	uid, _ := uidAny.(uint)
 
-	// Cari student berdasarkan user_id
 	var student models.Student
 	if err := h.DB.Where("user_id = ?", uid).First(&student).Error; err != nil {
 		utils.JSONError(c, http.StatusForbidden, "Data mahasiswa tidak ditemukan", nil)
 		return
 	}
 
-	// Bind request
 	var req createEnrollmentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.JSONError(c, http.StatusUnprocessableEntity, "Validasi gagal", map[string]string{
@@ -53,7 +51,6 @@ func (h *EnrollmentHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// Validasi format tahun akademik
 	if !reTahunAkademik.MatchString(req.TahunAkademik) {
 		utils.JSONError(c, http.StatusUnprocessableEntity, "Validasi gagal", map[string]string{
 			"tahun_akademik": "Format harus YYYY/YYYY-Ganjil atau YYYY/YYYY-Genap",
@@ -61,7 +58,6 @@ func (h *EnrollmentHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// Cek course ada
 	var course models.Course
 	if err := h.DB.First(&course, req.CourseID).Error; err != nil {
 		utils.JSONError(c, http.StatusUnprocessableEntity, "Validasi gagal", map[string]string{
@@ -70,7 +66,6 @@ func (h *EnrollmentHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// Cek duplikasi
 	var dupCount int64
 	h.DB.Model(&models.Enrollment{}).
 		Where("student_id = ? AND course_id = ? AND tahun_akademik = ?",
@@ -82,10 +77,8 @@ func (h *EnrollmentHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// Hitung batas SKS berdasarkan IPK
 	batas := hitungBatasSKS(student.IPKTerakhir)
 
-	// Hitung total SKS yang sudah diambil di tahun akademik ini
 	var sumResult struct {
 		Total int64
 	}
@@ -103,17 +96,14 @@ func (h *EnrollmentHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// Transaction + row lock course
 	var enrollment models.Enrollment
 	txErr := h.DB.Transaction(func(tx *gorm.DB) error {
-		// Lock row course biar nggak race
 		var lockedCourse models.Course
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			First(&lockedCourse, req.CourseID).Error; err != nil {
 			return err
 		}
 
-		// Cek kuota
 		var terisi int64
 		tx.Model(&models.Enrollment{}).
 			Where("course_id = ?", lockedCourse.ID).
@@ -151,4 +141,48 @@ func (h *EnrollmentHandler) Create(c *gin.Context) {
 		"sks":            course.SKS,
 		"tahun_akademik": enrollment.TahunAkademik,
 	})
+}
+
+// =========================================================
+// DELETE /api/v1/enrollments/{id}
+// =========================================================
+func (h *EnrollmentHandler) Delete(c *gin.Context) {
+	uidAny, _ := c.Get("user_id")
+	uid, _ := uidAny.(uint)
+
+	// Cari student berdasarkan user login
+	var student models.Student
+	if err := h.DB.Where("user_id = ?", uid).First(&student).Error; err != nil {
+		utils.JSONError(c, http.StatusForbidden, "Data mahasiswa tidak ditemukan", nil)
+		return
+	}
+
+	// Parse ID
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
+	if err != nil || id < 1 {
+		utils.JSONError(c, http.StatusNotFound, "Enrollment tidak ditemukan", nil)
+		return
+	}
+
+	// Cari enrollment
+	var enrollment models.Enrollment
+	if err := h.DB.First(&enrollment, id).Error; err != nil {
+		utils.JSONError(c, http.StatusNotFound, "Enrollment tidak ditemukan", nil)
+		return
+	}
+
+	// Cek ownership
+	if enrollment.StudentID != student.ID {
+		utils.JSONError(c, http.StatusForbidden, "Akses ditolak", nil)
+		return
+	}
+
+	// Hapus
+	if err := h.DB.Delete(&enrollment).Error; err != nil {
+		utils.JSONError(c, http.StatusInternalServerError, "Gagal menghapus enrollment", nil)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }
